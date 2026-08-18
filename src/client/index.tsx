@@ -114,7 +114,7 @@ type Preview = ReadyPreview
   | { readonly status: 'failed'; readonly error: string }
 
 const PATH = '/turn-rewind'
-const STYLE_ID = '@dsh-external/turn-rewind'
+const STYLE_ID = '@deepseek-ai/dsh-turn-rewind'
 const styles = `
 .dcl-rewind-tail{display:inline-flex;align-items:center;align-self:center;order:0;height:24px;margin-left:2px}
 .dcl-rewind-trigger{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}
@@ -160,7 +160,7 @@ export function apply(ctx: ClientContextLike): void {
   ctx.effect(() => {
     if (document.querySelector(`style[data-plugin-css="${STYLE_ID}"]`) !== null) return () => {}
     const tag = document.createElement('style')
-    tag.dataset.plugin = '@dsh-external/turn-rewind'
+    tag.dataset.plugin = '@deepseek-ai/dsh-turn-rewind'
     tag.dataset.pluginCss = STYLE_ID
     tag.textContent = styles
     document.head.appendChild(tag)
@@ -208,11 +208,52 @@ export function RewindMessagePortals({ sessionId, openRestoredSession, useSessio
     }
   }, [nodes])
 
-  return targets.map(target => createPortal(
-    <RewindMessageAction matched={target.matched} sessionId={sessionId} openRestoredSession={openRestoredSession} />,
-    target.container,
-    `${sessionId}:${String(target.matched.messageSeq)}`,
-  ))
+  const latest = targets.reduce<RewindPortalTarget | undefined>((current, target) => (
+    current === undefined || target.matched.messageSeq > current.matched.messageSeq ? target : current
+  ), undefined)
+  if (latest === undefined) return null
+  return createPortal(
+    <EditMessageAction matched={latest.matched} sessionId={sessionId} openRestoredSession={openRestoredSession} />,
+    latest.container,
+    `${sessionId}:${String(latest.matched.messageSeq)}`,
+  )
+}
+
+/** Edit the newest user message by branching before it and pre-filling the new composer. */
+export function EditMessageAction({ matched, sessionId, openRestoredSession }: RewindMessageActionProps): ReactNode {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const edit = async (): Promise<void> => {
+    if (pending) return
+    setPending(true)
+    setError(null)
+    try {
+      const response = await fetch(PATH, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'edit', sessionId, messageSeq: matched.messageSeq }),
+      })
+      const result = recordOf(await responseJson(response))
+      if (requiredString(result.action, 'action') !== 'edit') throw new Error('服务器返回了不匹配的编辑操作')
+      await openRestoredSession(requiredString(result.sessionId, 'sessionId'), matched.promptText)
+    } catch (caught) {
+      setError(`无法打开可编辑的对话：${messageOf(caught)}`)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="dcl-rewind-tail">
+      <Tooltip label="编辑这条消息" side="bottom">
+        <button type="button" className="dcl-rewind-trigger" onClick={() => { void edit() }} disabled={pending} aria-label="编辑这条消息">
+          <PencilIcon size={16} />
+        </button>
+      </Tooltip>
+      {error !== null && <span className="dcl-rewind-error" role="alert">{error}</span>}
+    </div>
+  )
 }
 
 /** User-message action and its review-first file/conversation restore dialog. */
@@ -500,7 +541,9 @@ function decodePreview(value: unknown): Preview {
 
 /** Resolve one conversation node to its DOM row key and rewind match. */
 export function selectRewindMessageTarget(value: RewindNodeLike): { readonly matched: RewindMatch; readonly rowKey: string } | null {
-  const node = 'key' in value && 'data' in value ? value.data : value
+  const node = 'key' in value && 'data' in value
+    ? { ...value.data, kind: value.kind }
+    : value
   const matched = selectRewindMessage(node)
   if (matched === null) return null
   return {
@@ -518,13 +561,28 @@ function collectPortalTargets(nodes: readonly RewindNodeLike[]): readonly Rewind
     if (key !== undefined) rows.set(key, element)
   }
   const targets: RewindPortalTarget[] = []
+  const usedContainers = new Set<HTMLElement>()
   for (const value of nodes) {
     const target = selectRewindMessageTarget(value)
     if (target === null) continue
     const row = rows.get(target.rowKey)
-    const messageRoot = row?.querySelector<HTMLElement>(':scope > [data-time-hover-root="true"]')
+    const messageRoot = row?.querySelector<HTMLElement>('[data-time-hover-root="true"]')
     const actions = messageRoot?.lastElementChild
     if (!(actions instanceof HTMLElement) || actions.querySelector(':scope > button') === null) continue
+    targets.push({ container: actions, matched: target.matched })
+    usedContainers.add(actions)
+  }
+  const unmatched = nodes
+    .map(selectRewindMessageTarget)
+    .filter((target): target is { readonly matched: RewindMatch; readonly rowKey: string } => target !== null && !rows.has(target.rowKey))
+  const legacyActions = Array.from(document.querySelectorAll<HTMLElement>(
+    '[data-time-hover-root="true"]:not([data-turn-tail]):not([data-pending-steering])',
+  )).map(root => root.lastElementChild).filter((actions): actions is HTMLElement =>
+    actions instanceof HTMLElement && actions.querySelector(':scope > button') !== null && !usedContainers.has(actions),
+  )
+  for (const [index, target] of unmatched.entries()) {
+    const actions = legacyActions[index]
+    if (actions === undefined) break
     targets.push({ container: actions, matched: target.matched })
   }
   return targets
@@ -621,6 +679,14 @@ function RewindIcon({ size }: { readonly size: number }): ReactNode {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d="M6.35 3.25 2.75 7l3.6 3.75M3.1 7h5.15a4.25 4.25 0 0 1 4.25 4.25v1.25" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function PencilIcon({ size }: { readonly size: number }): ReactNode {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="m3 11.8 1.1-3.2 6.6-6.6a1.45 1.45 0 0 1 2.05 2.05l-6.6 6.6L3 11.8Zm6.7-8.7 2.05 2.05" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

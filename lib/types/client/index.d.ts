@@ -69,6 +69,8 @@ export declare const inject: string[];
 export declare function apply(ctx: ClientContextLike): void;
 /** Session-scoped bridge that portals rewind controls into direct user-message action rows. */
 export declare function RewindMessagePortals({ sessionId, openRestoredSession, useSession }: RewindPortalBridgeProps): ReactNode;
+/** Edit the newest user message by branching before it and pre-filling the new composer. */
+export declare function EditMessageAction({ matched, sessionId, openRestoredSession }: RewindMessageActionProps): ReactNode;
 /** User-message action and its review-first file/conversation restore dialog. */
 export declare function RewindMessageAction({ matched, sessionId, openRestoredSession }: RewindMessageActionProps): ReactNode;
 /** Resolve one conversation node to its DOM row key and rewind match. */

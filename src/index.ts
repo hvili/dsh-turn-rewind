@@ -1,8 +1,8 @@
 /**
  * DSH Turn Rewind, powered by persistent, inspectable, approval-gated Change Ledger restore points.
- * @module @dsh-external/turn-rewind
+ * @module @deepseek-ai/dsh-turn-rewind
  */
-import { Service, type Context } from 'cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import { ChangeLedgerEngine } from './engine.js'
 import { installRewindHttp, TurnCheckpointCoordinator } from './rewind-host.js'
 import type { ChangeLedgerConfig } from './types.js'
@@ -12,7 +12,7 @@ export * from './errors.js'
 export * from './rewind-host.js'
 export * from './types.js'
 
-declare module 'cordis' {
+declare module '@deepseek-ai/cordis' {
   interface Context {
     changeLedger: ChangeLedgerService
   }
@@ -28,7 +28,7 @@ export class ChangeLedgerService extends Service {
     this.engine = new ChangeLedgerEngine(config)
     const checkpoints = new TurnCheckpointCoordinator(this.engine)
     ctx.inject(['agents'], (scope: Context) => { checkpoints.install(scope) })
-    ctx.inject(['httpServer', 'sessions', 'sessionQuery', 'apiProxy', 'agents'], (scope: Context) => {
+    ctx.inject(['webServer', 'sessions', 'sessionQuery', 'apiProxy', 'agents'], (scope: Context) => {
       installRewindHttp(scope, this.engine, checkpoints)
     })
     void this.engine.initialize().then((reconciled) => {

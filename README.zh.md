@@ -4,24 +4,24 @@
 
 [English](README.md)
 
-为 DeepSeek Harness 提供 Turn 级项目文件恢复，并可选择从恢复后的这一轮继续新对话。
+消息级项目文件恢复（message-anchored project-file recovery）——为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Turn 级项目文件恢复，并可选择从恢复后的这一轮继续新对话。
 
 **Turn Rewind** 是用户看到的功能名、仓库名和 Profile Bundle 名。**Change Ledger** 是底层持久恢复引擎；`ctx.changeLedger` 服务、磁盘格式和存储路径继续保留这个名字，因为它们描述的是可复用的快照与恢复层，而不只是 Web 上的回退按钮。
 
 它给 DSH Session 增加一条明确的安全边界：
 
 ```text
-创建恢复点
-    ↓
-Agent / 用户 / 外部程序修改工作树
-    ↓
-预览逐路径变化
-    ↓
-审阅全部或部分恢复计划
-    ↓
-在回退弹窗中按下最终恢复按钮
-    ↓
-先建救援点 → 恢复 → 哈希验证
+create restore point
+        ↓
+agent / user / external tools modify the worktree
+        ↓
+preview exact path-level drift
+        ↓
+review a full or selective restore plan
+        ↓
+press the final restore button in the rewind dialog
+        ↓
+create rescue point → restore → verify
 ```
 
 插件**不会**自动 commit、stash、reset、切分支、修改 Git index，也不会替用户判断某项改动“应该回滚”。
@@ -156,7 +156,7 @@ export async function apply(ctx: Context) {
     sessionId: 'session-id',
     label: 'before refactor',
   })
-  // point.id 是持久恢复点 ID。
+  // point.id is a durable restore-point id.
 }
 ```
 

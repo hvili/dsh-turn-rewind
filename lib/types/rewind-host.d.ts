@@ -1,4 +1,4 @@
-import type { Context } from 'cordis';
+import type { Context } from '@deepseek-ai/cordis';
 import type { ChangeLedgerEngine } from './engine.js';
 interface SessionEventLike {
     readonly type: string;
@@ -90,13 +90,33 @@ interface ApiProxyLike {
             };
         }>;
     };
+    readonly workspace: {
+        archiveSession(request: {
+            readonly rpcId: string;
+            readonly payload: {
+                readonly sessionId: string;
+            };
+        }): Promise<{
+            readonly result: {
+                readonly ok: true;
+                readonly value: {
+                    readonly archivedSessionIds: readonly string[];
+                };
+            } | {
+                readonly ok: false;
+                readonly error: {
+                    readonly message: string;
+                };
+            };
+        }>;
+    };
 }
-declare module 'cordis' {
+declare module '@deepseek-ai/cordis' {
     interface Context {
         agents: AgentsLike;
         sessions: SessionsLike;
         sessionQuery: SessionQueryLike;
-        httpServer: HttpServerLike;
+        webServer: HttpServerLike;
         apiProxy: ApiProxyLike;
     }
     interface Events {

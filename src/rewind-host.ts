@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Context } from 'cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import { ChangeLedgerError, errorMessage } from './errors.js'
 import type { ChangeLedgerEngine } from './engine.js'
 import { discoverRepositoryRoot } from './git.js'
@@ -80,14 +80,24 @@ interface ApiProxyLike {
         | { readonly ok: false; readonly error: { readonly message: string } }
     }>
   }
+  readonly workspace: {
+    archiveSession(request: {
+      readonly rpcId: string
+      readonly payload: { readonly sessionId: string }
+    }): Promise<{
+      readonly result:
+        | { readonly ok: true; readonly value: { readonly archivedSessionIds: readonly string[] } }
+        | { readonly ok: false; readonly error: { readonly message: string } }
+    }>
+  }
 }
 
-declare module 'cordis' {
+declare module '@deepseek-ai/cordis' {
   interface Context {
     agents: AgentsLike
     sessions: SessionsLike
     sessionQuery: SessionQueryLike
-    httpServer: HttpServerLike
+    webServer: HttpServerLike
     apiProxy: ApiProxyLike
   }
 
@@ -209,7 +219,7 @@ export function installRewindHttp(
   engine: ChangeLedgerEngine,
   coordinator: TurnCheckpointCoordinator,
 ): void {
-  ctx.effect(() => ctx.httpServer.register({
+  ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: REWIND_HTTP_PATH,
     handler: createRewindHttpHandler(ctx, engine, coordinator),
@@ -278,6 +288,30 @@ export function createRewindHttpHandler(
       }
       if (request.method === 'POST') {
         const body = objectBody(await readBody(request))
+        const action = body.action
+        if (action === 'edit') {
+          const sessionId = requiredText(body.sessionId, 'sessionId')
+          const messageSeq = nonNegativeInteger(body.messageSeq, 'messageSeq')
+          const source = await readSession(ctx, sessionId)
+          const target = messageTarget(source, messageSeq)
+          const latest = source.events.findLast(event => event.type === 'user/message' && isDirectUserMessage(event))
+          if (latest?.seq !== messageSeq) {
+            throw new ChangeLedgerError('PLAN_STALE', 'only the latest user message can be edited')
+          }
+          const fork = await createConversationRestart(ctx, sessionId, target)
+          const archived = await ctx.apiProxy.workspace.archiveSession({
+            rpcId: randomUUID(),
+            payload: { sessionId },
+          })
+          if (!archived.result.ok) {
+            throw new ChangeLedgerError(
+              'CONVERSATION_REWIND_FAILED',
+              `the editable revision was created, but the previous revision could not be archived: ${archived.result.error.message}`,
+            )
+          }
+          json(response, 200, { status: 'completed', action, sessionId: fork.sessionId })
+          return
+        }
         const mode = body.mode
         if (mode !== 'code' && mode !== 'both') {
           throw new ChangeLedgerError('INVALID_ARGUMENTS', 'mode must be "code" or "both"')
@@ -432,23 +466,23 @@ async function checkpointForRequest(
 async function createConversationRestart(
   ctx: Pick<Context, 'sessions' | 'sessionQuery' | 'apiProxy'>,
   sourceId: string,
-  checkpoint: MessageCheckpoint,
+  target: MessageTarget,
 ): Promise<{ readonly sessionId: string }> {
   const source = await readSession(ctx, sourceId)
-  const current = messageTarget(source, checkpoint.messageSeq)
-  if (current.turn !== checkpoint.turn
-    || current.turnStartSeq !== checkpoint.turnStartSeq
-    || current.previousTurnEndSeq !== checkpoint.previousTurnEndSeq) {
+  const current = messageTarget(source, target.messageSeq)
+  if (current.turn !== target.turn
+    || current.turnStartSeq !== target.turnStartSeq
+    || current.previousTurnEndSeq !== target.previousTurnEndSeq) {
     throw new ChangeLedgerError('PLAN_STALE', 'the session no longer contains the selected message boundary')
   }
-  const response = checkpoint.previousTurnEndSeq === undefined
+  const response = target.previousTurnEndSeq === undefined
     ? await ctx.apiProxy.sessions.create({
         rpcId: randomUUID(),
-        payload: { cwd: checkpoint.cwd },
+        payload: { cwd: target.cwd },
       })
     : await ctx.apiProxy.sessions.fork({
         rpcId: randomUUID(),
-        payload: { sessionId: sourceId, atSeq: checkpoint.previousTurnEndSeq },
+        payload: { sessionId: sourceId, atSeq: target.previousTurnEndSeq },
       })
   if (!response.result.ok) {
     throw new ChangeLedgerError('CONVERSATION_REWIND_FAILED', response.result.error.message)
