@@ -79,7 +79,8 @@ export function sameRepositoryFence(left: RepositoryState, right: RepositoryStat
 
 async function git(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    execFile('git', ['-c', 'core.quotepath=false', '-C', cwd, ...args], {
+    execFile('git', ['-c', 'core.quotepath=false', ...args], {
+      cwd,
       encoding: 'utf8',
       maxBuffer: GIT_MAX_BUFFER,
       windowsHide: true,

@@ -5,10 +5,11 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import test from 'node:test'
+import nodeTest, { describe } from 'node:test'
 import { ChangeLedgerEngine, ChangeLedgerError, LEDGER_FORMAT_VERSION, resolveConfig } from '../lib/index.js'
 
 const execFileAsync = promisify(execFile)
+const test = (name, fn) => nodeTest(name, { concurrency: 4 }, fn)
 
 async function fixture() {
   const outer = await mkdtemp(join(tmpdir(), 'dsh-change-ledger-test-'))
@@ -32,11 +33,25 @@ async function fixture() {
 }
 
 async function git(cwd, ...args) {
-  const { stdout } = await execFileAsync('git', ['-C', cwd, ...args], {
+  const { stdout } = await execFileAsync('git', args, {
+    cwd,
     encoding: 'utf8',
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' },
   })
   return stdout.trim()
+}
+
+async function symlinkOrSkip(t, target, path) {
+  try {
+    await symlink(target, path)
+    return true
+  } catch (error) {
+    if (process.platform === 'win32' && error?.code === 'EPERM') {
+      t.skip('requires Windows Developer Mode or a process permitted to create symbolic links')
+      return false
+    }
+    throw error
+  }
 }
 
 async function seedCommitted(workspace, files) {
@@ -48,6 +63,8 @@ async function seedCommitted(workspace, files) {
   await git(workspace, 'add', '--all')
   await git(workspace, 'commit', '-m', 'seed')
 }
+
+describe('ChangeLedgerEngine', { concurrency: 4 }, () => {
 
 test('creates and lists a content-addressed restore point without Git side effects', async (t) => {
   const f = await fixture()
@@ -123,6 +140,10 @@ test('turn checkpoint retention prunes only the oldest checkpoint in the same se
 })
 
 test('worktree discovery preserves legal trailing spaces in the root path', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows process paths cannot address a working directory with a trailing space')
+    return
+  }
   const outer = await mkdtemp(join(tmpdir(), 'dsh-change-ledger-space-test-'))
   t.after(async () => rm(outer, { recursive: true, force: true }))
   const workspace = join(outer, 'workspace ')
@@ -147,7 +168,7 @@ test('inspect classifies add, delete, content, mode, and symlink changes', async
     'target-a.txt': 'a\n',
     'target-b.txt': 'b\n',
   })
-  await symlink('target-a.txt', join(f.workspace, 'link.txt'))
+  if (!await symlinkOrSkip(t, 'target-a.txt', join(f.workspace, 'link.txt'))) return
   await git(f.workspace, 'add', 'link.txt')
   await git(f.workspace, 'commit', '-m', 'add symlink')
   const point = await f.engine.create({ cwd: f.workspace })
@@ -415,7 +436,7 @@ test('symlink contents round-trip without following the target', async (t) => {
   const f = await fixture()
   t.after(f.cleanup)
   await seedCommitted(f.workspace, { 'target-a': 'a', 'target-b': 'b' })
-  await symlink('target-a', join(f.workspace, 'link'))
+  if (!await symlinkOrSkip(t, 'target-a', join(f.workspace, 'link'))) return
   await git(f.workspace, 'add', 'link')
   await git(f.workspace, 'commit', '-m', 'link')
   const point = await f.engine.create({ cwd: f.workspace })
@@ -573,7 +594,7 @@ test('the blob store rejects content that does not match its requested address',
   )
 })
 
-test('default storage follows DSH_HOME', async (t) => {
+nodeTest('default storage follows DSH_HOME', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-change-ledger-home-test-'))
   t.after(async () => rm(root, { recursive: true, force: true }))
   const previous = process.env.DSH_HOME
@@ -584,4 +605,6 @@ test('default storage follows DSH_HOME', async (t) => {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous
   }
+})
+
 })

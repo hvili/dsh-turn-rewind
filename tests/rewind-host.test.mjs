@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import test from 'node:test'
+import nodeTest, { describe } from 'node:test'
 import {
   ChangeLedgerEngine,
   TurnCheckpointCoordinator,
@@ -13,6 +13,7 @@ import {
 } from '../lib/index.js'
 
 const execFileAsync = promisify(execFile)
+const test = (name, fn) => nodeTest(name, { concurrency: 4 }, fn)
 
 async function fixture() {
   const outer = await mkdtemp(join(tmpdir(), 'dsh-turn-rewind-test-'))
@@ -30,10 +31,13 @@ async function fixture() {
 }
 
 async function git(cwd, ...args) {
-  await execFileAsync('git', ['-C', cwd, ...args], {
+  await execFileAsync('git', args, {
+    cwd,
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' },
   })
 }
+
+describe('TurnRewindHost', { concurrency: 4 }, () => {
 
 test('first-step checkpoint finishes before the user turn continues', async (t) => {
   const f = await fixture()
@@ -463,6 +467,8 @@ test('persisted multi-level lineage validates every inherited message boundary a
   })
   const stale = await request(handler, 'GET', '/turn-rewind?sessionId=leaf&messageSeq=2')
   assert.equal(stale.body.code, 'PLAN_STALE')
+})
+
 })
 
 async function request(handler, method, url, body) {
