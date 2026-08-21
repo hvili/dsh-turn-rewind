@@ -213,7 +213,10 @@ export function RewindMessagePortals({ sessionId, openRestoredSession, useSessio
   ), undefined)
   if (latest === undefined) return null
   return createPortal(
-    <EditMessageAction matched={latest.matched} sessionId={sessionId} openRestoredSession={openRestoredSession} />,
+    <>
+      <EditMessageAction matched={latest.matched} sessionId={sessionId} openRestoredSession={openRestoredSession} />
+      <RewindMessageAction matched={latest.matched} sessionId={sessionId} openRestoredSession={openRestoredSession} />
+    </>,
     latest.container,
     `${sessionId}:${String(latest.matched.messageSeq)}`,
   )
