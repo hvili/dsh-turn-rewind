@@ -62,6 +62,7 @@ interface ClientContextLike {
     effect(setup: () => (() => void), label?: string): unknown;
 }
 type ChangeKind = 'added' | 'deleted' | 'modified' | 'mode-changed' | 'type-changed';
+type Locale = 'zh' | 'en';
 /** Return the rewind anchor and editable text owned by one direct user message. */
 export declare function selectRewindMessage(node: ConversationNodeLike): RewindMatch | null;
 /** Browser plugin entry: bridge every direct user-message action row to the rewind UI. */
@@ -69,7 +70,7 @@ export declare const inject: string[];
 export declare function apply(ctx: ClientContextLike): void;
 /** Session-scoped bridge that portals rewind controls into direct user-message action rows. */
 export declare function RewindMessagePortals({ sessionId, openRestoredSession, useSession }: RewindPortalBridgeProps): ReactNode;
-/** Edit the newest user message by branching before it and pre-filling the new composer. */
+/** Edit a direct user message by branching before it and pre-filling the new composer. */
 export declare function EditMessageAction({ matched, sessionId, openRestoredSession }: RewindMessageActionProps): ReactNode;
 /** User-message action and its review-first file/conversation restore dialog. */
 export declare function RewindMessageAction({ matched, sessionId, openRestoredSession }: RewindMessageActionProps): ReactNode;
@@ -79,5 +80,5 @@ export declare function selectRewindMessageTarget(value: RewindNodeLike): {
     readonly rowKey: string;
 } | null;
 /** Describe the user-visible result of restoring one changed file. */
-export declare function fileRecoveryLabel(kind: ChangeKind): string;
+export declare function fileRecoveryLabel(kind: ChangeKind, lang?: Locale): string;
 export {};

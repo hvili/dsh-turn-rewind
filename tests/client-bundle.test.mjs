@@ -155,7 +155,7 @@ test('rewind dialog restores files in two modes and allows reviewed Git history 
 
   async function run(mode, preview, result) {
     stateIndex = 0
-    values = [true, false, preview, mode, false, false, false, null, null]
+    values = ['zh', true, false, preview, mode, false, false, false, null, null]
     let request
     let opened
     let restoredPrompt
@@ -195,7 +195,7 @@ test('rewind dialog restores files in two modes and allows reviewed Git history 
   assert.ok(findNode(advancedHead.tree, node => node.type === 'p' && String(node.props.children).includes('不会撤销提交')))
 
   stateIndex = 0
-  values = [true, false, { ...ready, operationChanged: true, restoreBlocked: true, planId: undefined, confirmation: undefined }, 'both', false, false, false, null, null]
+  values = ['zh', true, false, { ...ready, operationChanged: true, restoreBlocked: true, planId: undefined, confirmation: undefined }, 'both', false, false, false, null, null]
   const blockedTree = plugin.RewindMessageAction({
     matched: { messageSeq: 2, promptText: '修复这个问题' }, sessionId: 'session-source', async openRestoredSession() {},
   })
@@ -209,7 +209,7 @@ test('rewind dialog restores files in two modes and allows reviewed Git history 
   assert.equal(findNode(blockedTree, node => node.type === 'input' && node.props.type === 'checkbox'), undefined)
 
   stateIndex = 0
-  values = [true, false, { ...ready, totalChanges: 0, changes: [], planId: undefined, confirmation: undefined }, 'both', false, false, false, null, null]
+  values = ['zh', true, false, { ...ready, totalChanges: 0, changes: [], planId: undefined, confirmation: undefined }, 'both', false, false, false, null, null]
   const noFilesTree = plugin.RewindMessageAction({
     matched: { messageSeq: 2, promptText: '修复这个问题' }, sessionId: 'session-source', async openRestoredSession() {},
   })
@@ -218,7 +218,7 @@ test('rewind dialog restores files in two modes and allows reviewed Git history 
   assert.ok(findNode(noFilesTree, node => node.type === 'p' && String(node.props.children).includes('分支新对话')))
 
   stateIndex = 0
-  values = [true, false, { status: 'failed', error: 'transient' }, 'both', false, false, false, null, null]
+  values = ['zh', true, false, { status: 'failed', error: 'transient' }, 'both', false, false, false, null, null]
   let retryUrl
   context.fetch = async (url) => {
     retryUrl = url
