@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { lstat, realpath } from 'node:fs/promises'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import { ChangeLedgerError, errorMessage } from './errors.js'
 import { canonicalDirectory, isNodeError, validateRelativePath } from './path-utils.js'
 import type { RepositoryState } from './types.js'
@@ -173,7 +173,3 @@ function comparePaths(left: string, right: string): number {
   return Buffer.from(left).compare(Buffer.from(right))
 }
 
-/** Return the Git metadata directory for diagnostics. */
-export function gitMetadataParent(state: RepositoryState): string {
-  return dirname(state.commonDir)
-}

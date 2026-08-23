@@ -94,16 +94,6 @@ export async function readJson(path: string): Promise<unknown> {
   }
 }
 
-/** Return whether a filesystem path exists without following its final symlink. */
-export async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path)
-    return true
-  } catch (error) {
-    if (isNodeError(error, 'ENOENT')) return false
-    throw error
-  }
-}
 
 /** Ensure every existing parent below `root` is a real directory, never a symlink. */
 export async function ensureSafeParents(root: string, target: string): Promise<void> {

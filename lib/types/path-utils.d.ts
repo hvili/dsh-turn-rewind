@@ -12,8 +12,6 @@ export declare function canonicalDirectory(path: string): Promise<string>;
 export declare function writeJsonAtomic(path: string, value: unknown): Promise<void>;
 /** Read and parse one JSON file. */
 export declare function readJson(path: string): Promise<unknown>;
-/** Return whether a filesystem path exists without following its final symlink. */
-export declare function pathExists(path: string): Promise<boolean>;
 /** Ensure every existing parent below `root` is a real directory, never a symlink. */
 export declare function ensureSafeParents(root: string, target: string): Promise<void>;
 /** Replace a path with a regular file using a sibling temporary file. */

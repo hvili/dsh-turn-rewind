@@ -21,7 +21,7 @@ export interface CapturedTree {
 }
 
 /** Capture the current tracked and non-ignored Git working tree. */
-export async function captureTree(options: {
+async function captureTree(options: {
   readonly cwd: string
   readonly config: ResolvedChangeLedgerConfig
   readonly store?: LedgerStore

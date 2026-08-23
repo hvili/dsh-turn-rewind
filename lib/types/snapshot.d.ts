@@ -9,13 +9,6 @@ export interface CapturedTree {
     readonly fileCount: number;
     readonly totalBytes: number;
 }
-/** Capture the current tracked and non-ignored Git working tree. */
-export declare function captureTree(options: {
-    readonly cwd: string;
-    readonly config: ResolvedChangeLedgerConfig;
-    readonly store?: LedgerStore;
-    readonly signal?: AbortSignal;
-}): Promise<CapturedTree>;
 /**
  * Capture the complete tree twice and accept it only when both path/content and
  * repository fences agree. This prevents a point from silently mixing files

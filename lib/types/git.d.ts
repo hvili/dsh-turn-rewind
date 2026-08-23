@@ -10,5 +10,3 @@ export declare function discoverRepository(cwd: string, signal?: AbortSignal): P
 export declare function discoverRepositoryRoot(cwd: string, signal?: AbortSignal): Promise<string>;
 /** Return true when two repository fences refer to the same checkout state. */
 export declare function sameRepositoryFence(left: RepositoryState, right: RepositoryState): boolean;
-/** Return the Git metadata directory for diagnostics. */
-export declare function gitMetadataParent(state: RepositoryState): string;
