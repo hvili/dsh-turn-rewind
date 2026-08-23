@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write plugins/dsh-turn-rewind/README.md
-README.md: 8615bfa457cb00de5f32d935df7a7ed89295a5fd
-README.zh.md: f7c348f2a6c0030a32f6c5df4a3e038ccc26a216
+README.md: 38d931b3f049201c10a0429f39c70b243cdc575f
+README.zh.md: f7e412b156865ce865fb022299c6e5b864a218c2
