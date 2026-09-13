@@ -80,7 +80,7 @@ interface ClientContextLike {
   effect(setup: () => (() => void), label?: string): unknown
 }
 
-type RewindMode = 'both' | 'code'
+type RewindMode = 'conversation' | 'both' | 'code'
 type ChangeKind = 'added' | 'deleted' | 'modified' | 'mode-changed' | 'type-changed'
 
 interface ReadyPreview {
@@ -106,11 +106,12 @@ interface ReadyPreview {
   readonly restoreBlocked: boolean
   readonly planId?: string
   readonly confirmation?: string
+  readonly fileRestoreAvailable: boolean
 }
 
 type Preview = ReadyPreview
   | { readonly status: 'pending' }
-  | { readonly status: 'missing' }
+  | { readonly status: 'missing'; readonly reason?: string }
   | { readonly status: 'failed'; readonly error: string }
 
 type Locale = 'zh' | 'en'
@@ -129,6 +130,13 @@ type CopyKey =
   | 'rewind.cancel'
   | 'rewind.applying'
   | 'rewind.done'
+  | 'rewind.actionConversation'
+  | 'rewind.optionConversationTitle'
+  | 'rewind.optionConversationDesc'
+  | 'rewind.summaryConversation'
+  | 'rewind.targetMessage'
+  | 'rewind.nonGitRepo'
+  | 'rewind.completedConversation'
   | 'rewind.actionBoth'
   | 'rewind.actionCode'
   | 'rewind.loading'
@@ -195,6 +203,13 @@ const COPY: Record<Locale, Record<CopyKey, string>> = {
     'rewind.cancel': '取消',
     'rewind.applying': '正在恢复…',
     'rewind.done': '已完成',
+    'rewind.actionConversation': '仅回退对话',
+    'rewind.optionConversationTitle': '仅回退对话，保留当前文件',
+    'rewind.optionConversationDesc': '回到这条消息之前继续对话；当前工作区文件保持不变。',
+    'rewind.summaryConversation': '原对话将保留在归档中',
+    'rewind.targetMessage': '目标消息：{prompt}',
+    'rewind.nonGitRepo': '当前目录不是 Git 仓库，无法恢复项目文件；仍可仅回退对话。',
+    'rewind.completedConversation': '对话已回退，当前文件保持不变；原对话已归档。',
     'rewind.actionBoth': '恢复并从这里继续',
     'rewind.actionCode': '恢复文件',
     'rewind.loading': '正在检查可以恢复的项目文件…',
@@ -260,6 +275,13 @@ const COPY: Record<Locale, Record<CopyKey, string>> = {
     'rewind.cancel': 'Cancel',
     'rewind.applying': 'Restoring…',
     'rewind.done': 'Done',
+    'rewind.actionConversation': 'Rewind conversation only',
+    'rewind.optionConversationTitle': 'Rewind conversation only, keep current files',
+    'rewind.optionConversationDesc': 'Continue before this message; the current workspace files stay unchanged.',
+    'rewind.summaryConversation': 'The previous conversation is kept in Archive',
+    'rewind.targetMessage': 'Target message: {prompt}',
+    'rewind.nonGitRepo': 'The current directory is not a Git repository, so project files cannot be restored; conversation-only rewind is still available.',
+    'rewind.completedConversation': 'Conversation rewound; current files unchanged. The previous conversation was archived.',
     'rewind.actionBoth': 'Restore files and continue here',
     'rewind.actionCode': 'Restore files only',
     'rewind.loading': 'Checking which project files can be restored…',
@@ -380,6 +402,8 @@ const styles = `
 .dcl-rewind-kind{flex:none;color:var(--dsw-alias-label-tertiary)}
 .dcl-rewind-file-actions{display:flex;justify-content:flex-start}
 .dcl-rewind-status{margin:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px}
+.dcl-rewind-target{box-sizing:border-box;max-width:100%;margin:0;padding:10px 12px;overflow-wrap:anywhere;word-break:break-word;border-radius:10px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:pre-wrap}
+.dcl-rewind-target::before{content:"↩";margin-right:6px;color:var(--dsw-alias-label-tertiary)}
 .dcl-rewind-warning,.dcl-rewind-error{box-sizing:border-box;max-width:100%;margin:0;padding:10px 12px;overflow-wrap:anywhere;word-break:break-word;border-radius:10px;font-size:12px;line-height:18px}
 .dcl-rewind-warning{background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-primary)}
 .dcl-rewind-error{border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 30%,transparent);color:var(--dsw-alias-state-error-primary)}
@@ -510,7 +534,7 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [preview, setPreview] = useState<Preview | null>(null)
-  const [mode, setMode] = useState<RewindMode>('both')
+  const [mode, setMode] = useState<RewindMode>('conversation')
   const [applying, setApplying] = useState(false)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [stale, setStale] = useState(false)
@@ -551,7 +575,7 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
   const show = (): void => {
     setOpen(true)
     setPreview(null)
-    setMode('both')
+    setMode('conversation')
     setStale(false)
     void load()
   }
@@ -570,13 +594,13 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
   }
   const ready = preview?.status === 'ready' ? preview : null
   const hasFileChanges = ready !== null && ready.totalChanges > 0
+  const nonGit = preview?.status === 'missing' && preview.reason === 'not-a-git-repository'
   const driftBlocked = hasFileChanges && ready?.operationChanged === true
   const sharedBlocked = (ready?.activeSessionIds.length ?? 0) > 0
   const planMissing = hasFileChanges && ready !== null && !sharedBlocked && !driftBlocked
     && (ready.planId === undefined || ready.confirmation === undefined)
-  const canApply = ready !== null
+  const fileApplyReady = ready !== null
     && !loading
-    && !applying
     && !loadingDetails
     && completed === null
     && hasFileChanges
@@ -584,6 +608,9 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
     && !sharedBlocked
     && !planMissing
     && !stale
+  const conversationReady = !applying && completed === null
+  const canApply = mode === 'conversation' ? conversationReady : fileApplyReady && !applying
+  const showFileOptions = hasFileChanges
 
   const loadAllChanges = async (): Promise<void> => {
     if (ready === null || loadingDetails || !ready.truncated) return
@@ -617,8 +644,38 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
     }
   }
 
+  const applyConversation = async (): Promise<void> => {
+    if (!conversationReady || applyPending.current) return
+    applyPending.current = true
+    setApplying(true)
+    setError(null)
+    setCompleted(null)
+    try {
+      const response = await fetch(PATH, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'rewindConversation', sessionId, messageSeq: matched.messageSeq }),
+      })
+      const result = recordOf(await responseJson(response))
+      if (requiredString(result.action, 'action') !== 'rewindConversation') throw new RewindRequestError('INVALID_RESPONSE', t('rewind.stale'))
+      const childSessionId = requiredString(result.sessionId, 'sessionId')
+      setCompleted(t('rewind.completedConversation'))
+      try {
+        await openRestoredSession(childSessionId, matched.promptText)
+        setOpen(false)
+      } catch (navigationError) {
+        setError(`${t('rewind.openFailed')}${messageOf(navigationError)}`)
+      }
+    } catch (caught) {
+      setError(friendlyError(caught, lang))
+    } finally {
+      applyPending.current = false
+      setApplying(false)
+    }
+  }
+
   const applyRestore = async (): Promise<void> => {
-    if (ready === null || !canApply || applyPending.current) return
+    if (ready === null || !fileApplyReady || applyPending.current) return
     const body: Record<string, unknown> = {
       mode,
       sessionId,
@@ -665,7 +722,12 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
     }
   }
 
-  const actionLabel = mode === 'both' ? t('rewind.actionBoth') : t('rewind.actionCode')
+  const apply = mode === 'conversation' ? applyConversation : applyRestore
+  const actionLabel = mode === 'conversation'
+    ? t('rewind.actionConversation')
+    : mode === 'both'
+      ? t('rewind.actionBoth')
+      : t('rewind.actionCode')
   const radioName = `dcl-rewind-${sessionId}-${String(matched.messageSeq)}`
   const branchChanged = ready !== null && ready.checkpointBranch !== ready.currentBranch
 
@@ -687,20 +749,26 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
         footer={(
           <>
             <Button variant="outline" onClick={close} disabled={applying}>{t('rewind.cancel')}</Button>
-            <Button variant="primary" onClick={() => { void applyRestore() }} disabled={!canApply}>
+            <Button variant="primary" onClick={() => { void apply() }} disabled={!canApply}>
               {applying ? t('rewind.applying') : completed === null ? actionLabel : t('rewind.done')}
             </Button>
           </>
         )}
       >
         <div className="dcl-rewind-body">
+          <p className="dcl-rewind-target">{t('rewind.targetMessage', { prompt: matched.promptText })}</p>
           {loading && <p className="dcl-rewind-status">{t('rewind.loading')}</p>}
           {preview?.status === 'pending' && <p className="dcl-rewind-status">{t('rewind.pending')}</p>}
-          {preview?.status === 'missing' && <p className="dcl-rewind-error">{t('rewind.missing')}</p>}
+          {preview?.status === 'missing' && !nonGit && <p className="dcl-rewind-error">{t('rewind.missing')}</p>}
+          {nonGit && <p className="dcl-rewind-warning">{t('rewind.nonGitRepo')}</p>}
           {preview?.status === 'failed' && <p className="dcl-rewind-error">{t('rewind.failed')}{preview.error}</p>}
-          {ready !== null && (
-            <>
-              <div className="dcl-rewind-options">
+          <div className="dcl-rewind-options">
+            <label className="dcl-rewind-option" data-selected={mode === 'conversation'} data-disabled={applying}>
+              <input type="radio" name={radioName} checked={mode === 'conversation'} disabled={applying} onChange={() => { chooseMode('conversation') }} />
+              <span className="dcl-rewind-option-content"><strong>{t('rewind.optionConversationTitle')}</strong><span className="dcl-rewind-option-description">{t('rewind.optionConversationDesc')}</span></span>
+            </label>
+            {showFileOptions && (
+              <>
                 <label className="dcl-rewind-option" data-selected={mode === 'both'} data-disabled={applying}>
                   <input type="radio" name={radioName} checked={mode === 'both'} disabled={applying} onChange={() => { chooseMode('both') }} />
                   <span className="dcl-rewind-option-content"><strong>{t('rewind.optionBothTitle')}</strong><span className="dcl-rewind-option-description">{t('rewind.optionBothDesc')}</span></span>
@@ -709,36 +777,39 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
                   <input type="radio" name={radioName} checked={mode === 'code'} disabled={applying} onChange={() => { chooseMode('code') }} />
                   <span className="dcl-rewind-option-content"><strong>{t('rewind.optionCodeTitle')}</strong><span className="dcl-rewind-option-description">{t('rewind.optionCodeDesc')}</span></span>
                 </label>
-              </div>
-              <div className="dcl-rewind-summary">
-                <strong>{t('rewind.summaryFiles', { count: ready.totalChanges })}</strong>
-                <span>{mode === 'both' ? t('rewind.summaryBoth') : t('rewind.summaryCode')}</span>
-              </div>
-              {sharedBlocked && (
-                <p className="dcl-rewind-error">{t('rewind.blockedShared')}</p>
-              )}
-              {ready.headChanged && !ready.operationChanged && (
-                <p className="dcl-rewind-warning">{branchChanged
-                  ? t('rewind.warnBranchChanged')
-                  : t('rewind.warnHeadChanged')}</p>
-              )}
-              {driftBlocked && <p className="dcl-rewind-warning">{t('rewind.warnDrift')}</p>}
-              {planMissing && <p className="dcl-rewind-error">{t('rewind.planMissing')}</p>}
-              {stale && <p className="dcl-rewind-error">{t('rewind.stale')}</p>}
-              {ready.totalChanges === 0 && <p className="dcl-rewind-status">{t('rewind.noChanges')}</p>}
-              {ready.changes.length > 0 && (
-                <div className="dcl-rewind-files">
-                  {ready.changes.map(change => <div className="dcl-rewind-file" key={change.path}><code>{change.path}</code><span className="dcl-rewind-kind">{fileRecoveryLabel(change.kind, lang)}</span></div>)}
-                </div>
-              )}
-              {ready.truncated && (
-                <div className="dcl-rewind-file-actions"><Button variant="outline" size="sm" onClick={() => { void loadAllChanges() }} disabled={loadingDetails}>{loadingDetails ? t('rewind.loadingDetails') : t('rewind.viewAll', { count: ready.totalChanges })}</Button></div>
-              )}
-            </>
+              </>
+            )}
+          </div>
+          <div className="dcl-rewind-summary">
+            {mode === 'conversation'
+              ? <strong>{t('rewind.summaryConversation')}</strong>
+              : ready !== null
+                ? <><strong>{t('rewind.summaryFiles', { count: ready.totalChanges })}</strong><span>{mode === 'both' ? t('rewind.summaryBoth') : t('rewind.summaryCode')}</span></>
+                : null}
+          </div>
+          {sharedBlocked && (
+            <p className="dcl-rewind-error">{t('rewind.blockedShared')}</p>
+          )}
+          {ready !== null && ready.headChanged && !ready.operationChanged && (
+            <p className="dcl-rewind-warning">{branchChanged
+              ? t('rewind.warnBranchChanged')
+              : t('rewind.warnHeadChanged')}</p>
+          )}
+          {driftBlocked && <p className="dcl-rewind-warning">{t('rewind.warnDrift')}</p>}
+          {planMissing && <p className="dcl-rewind-error">{t('rewind.planMissing')}</p>}
+          {stale && <p className="dcl-rewind-error">{t('rewind.stale')}</p>}
+          {ready !== null && ready.totalChanges === 0 && <p className="dcl-rewind-status">{t('rewind.noChanges')}</p>}
+          {ready !== null && ready.changes.length > 0 && (
+            <div className="dcl-rewind-files">
+              {ready.changes.map(change => <div className="dcl-rewind-file" key={change.path}><code>{change.path}</code><span className="dcl-rewind-kind">{fileRecoveryLabel(change.kind, lang)}</span></div>)}
+            </div>
+          )}
+          {ready !== null && ready.truncated && (
+            <div className="dcl-rewind-file-actions"><Button variant="outline" size="sm" onClick={() => { void loadAllChanges() }} disabled={loadingDetails}>{loadingDetails ? t('rewind.loadingDetails') : t('rewind.viewAll', { count: ready.totalChanges })}</Button></div>
           )}
           {completed !== null && <p className="dcl-rewind-status">{completed}</p>}
           {error !== null && <p className="dcl-rewind-error">{error}</p>}
-          {error !== null && <p className="dcl-rewind-backup">{t('rewind.backupNote')}</p>}
+          {error !== null && mode !== 'conversation' && <p className="dcl-rewind-backup">{t('rewind.backupNote')}</p>}
           {!loading && (preview?.status !== 'ready' || stale || planMissing || sharedBlocked || driftBlocked) && <Button className="dcl-rewind-retry" variant="outline" size="sm" onClick={() => { void load() }}>{t('rewind.retry')}</Button>}
         </div>
       </Modal>
@@ -749,7 +820,11 @@ export function RewindMessageAction({ matched, sessionId, openRestoredSession }:
 function decodePreview(value: unknown): Preview {
   const record = recordOf(value)
   const status = requiredString(record.status, 'status')
-  if (status === 'pending' || status === 'missing') return { status }
+  if (status === 'pending') return { status }
+  if (status === 'missing') return {
+    status,
+    ...(typeof record.reason === 'string' ? { reason: record.reason } : {}),
+  }
   if (status === 'failed') return { status, error: requiredString(record.error, 'error') }
   if (status !== 'ready') {
     throw new RewindRequestError('INVALID_RESPONSE', translate(currentLocale(), 'error.unknownStatus', { status }))
@@ -787,6 +862,7 @@ function decodePreview(value: unknown): Preview {
     ...optionalRecordString(record, 'currentOperation'),
     activeSessionIds: activeSessionIdsValue as string[],
     restoreBlocked: requiredBoolean(record.restoreBlocked, 'restoreBlocked'),
+    fileRestoreAvailable: requiredBoolean(record.fileRestoreAvailable, 'fileRestoreAvailable'),
     ...(typeof record.planId === 'string' ? { planId: record.planId } : {}),
     ...(typeof record.confirmation === 'string' ? { confirmation: record.confirmation } : {}),
   }

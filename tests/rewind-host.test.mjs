@@ -469,6 +469,121 @@ test('persisted multi-level lineage validates every inherited message boundary a
   assert.equal(stale.body.code, 'PLAN_STALE')
 })
 
+test('conversation-only rewind works in a non-Git directory and keeps files untouched', async (t) => {
+  const outer = await mkdtemp(join(tmpdir(), 'dsh-tr-non-git-'))
+  t.after(() => rm(outer, { recursive: true, force: true }))
+  const workspace = join(outer, 'workspace')
+  await mkdir(workspace)
+  await writeFile(join(workspace, 'notes.txt'), 'keep me\n')
+  const engine = new ChangeLedgerEngine({ storageDir: join(outer, 'state') })
+  await engine.initialize()
+  const sessions = new Map([
+    ['session-web', liveSession('session-web', workspace, twoTurnEvents())],
+  ])
+  let archived = false
+  let heldDraft = false
+  const handler = createRewindHttpHandler({
+    sessions: { get: id => sessions.get(id) },
+    sessionQuery: { readSession: async id => {
+      const session = sessions.get(id)
+      if (session === undefined) throw new Error(`missing ${id}`)
+      return { session: session.header, events: session.events }
+    } },
+    apiProxy: {
+      sessions: {
+        async create() { throw new Error('later message must fork') },
+        async fork(requestValue) {
+          if (requestValue.payload.sessionId === 'session-web') heldDraft = true
+          return okSession('session-child')
+        },
+      },
+      workspace: {
+        async archiveSession() { archived = true; return { result: { ok: true, value: { archivedSessionIds: ['session-web'] } } } },
+      },
+    },
+  }, engine, new TurnCheckpointCoordinator(engine))
+
+  const applied = await request(handler, 'POST', '/turn-rewind', {
+    action: 'rewindConversation', sessionId: 'session-web', messageSeq: 6,
+  })
+  assert.equal(applied.status, 200)
+  assert.equal(applied.body.action, 'rewindConversation')
+  assert.equal(applied.body.sessionId, 'session-child')
+  assert.equal(archived, true)
+  assert.equal(heldDraft, true)
+  assert.equal(await readFile(join(workspace, 'notes.txt'), 'utf8'), 'keep me\n')
+})
+
+test('preview in a non-Git directory stays usable without surfacing a Git failure', async (t) => {
+  const outer = await mkdtemp(join(tmpdir(), 'dsh-tr-non-git-preview-'))
+  t.after(() => rm(outer, { recursive: true, force: true }))
+  const workspace = join(outer, 'workspace')
+  await mkdir(workspace)
+  await writeFile(join(workspace, 'code.txt'), 'unchanged\n')
+  const engine = new ChangeLedgerEngine({ storageDir: join(outer, 'state') })
+  await engine.initialize()
+  const sessions = new Map([
+    ['session-web', liveSession('session-web', workspace, oneTurnEvents())],
+  ])
+  const handler = createRewindHttpHandler({
+    sessions: { get: id => sessions.get(id) },
+    sessionQuery: { readSession: async id => {
+      const session = sessions.get(id)
+      if (session === undefined) throw new Error(`missing ${id}`)
+      return { session: session.header, events: session.events }
+    } },
+    apiProxy: defaultApiProxy(),
+  }, engine, new TurnCheckpointCoordinator(engine))
+
+  const preview = await request(handler, 'GET', '/turn-rewind?sessionId=session-web&messageSeq=2')
+  assert.equal(preview.status, 200)
+  assert.equal(preview.body.status, 'missing')
+  assert.equal(preview.body.reason, 'not-a-git-repository')
+  assert.equal(preview.body.fileRestoreAvailable, false)
+})
+
+test('conversation-only and file restore are enforced separately on the client-facing surface', async (t) => {
+  // File restore modes still refuse a non-Git workspace, while conversation-only stays available.
+  const outer = await mkdtemp(join(tmpdir(), 'dsh-tr-non-git-apply-'))
+  t.after(() => rm(outer, { recursive: true, force: true }))
+  const workspace = join(outer, 'workspace')
+  await mkdir(workspace)
+  const engine = new ChangeLedgerEngine({ storageDir: join(outer, 'state') })
+  await engine.initialize()
+  const sessions = new Map([
+    ['session-web', liveSession('session-web', workspace, twoTurnEvents())],
+  ])
+  let childCreated = 0
+  const handler = createRewindHttpHandler({
+    sessions: { get: id => sessions.get(id) },
+    sessionQuery: { readSession: async id => {
+      const session = sessions.get(id)
+      if (session === undefined) throw new Error(`missing ${id}`)
+      return { session: session.header, events: session.events }
+    } },
+    apiProxy: {
+      sessions: {
+        async create() { throw new Error('later message must fork') },
+        async fork() { childCreated += 1; return okSession('session-child') },
+      },
+      workspace: {
+        async archiveSession() { return { result: { ok: true, value: { archivedSessionIds: ['session-web'] } } } },
+      },
+    },
+  }, engine, new TurnCheckpointCoordinator(engine))
+
+  const forced = await request(handler, 'POST', '/turn-rewind', {
+    mode: 'both', sessionId: 'session-web', messageSeq: 6, checkpointId: 'rp_any',
+  })
+  assert.ok(forced.status === 409, `file restore must fail closed in a non-Git workspace (got ${forced.status})`)
+  assert.equal(childCreated, 0)
+  const conversation = await request(handler, 'POST', '/turn-rewind', {
+    action: 'rewindConversation', sessionId: 'session-web', messageSeq: 6,
+  })
+  assert.equal(conversation.body.sessionId, 'session-child')
+  assert.equal(childCreated, 1)
+})
+
 })
 
 async function request(handler, method, url, body) {
